@@ -1,2 +1,3 @@
 # jslax
-slax scripts for Junos
+slax scripts for Junos devices
+
