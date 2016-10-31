@@ -1,0 +1,97 @@
+
+/*
+ * Author        : Juniper Networks
+ * Platform      : QFX10000 Only
+ *
+ * Description   :
+ * At commit time
+ *  if (et-||xe-) with interfaces configured under interface stanza are not in sflow config
+ *     add it to sflow config
+ *  if sflow egress sampling is enabled
+ *     disable/delete it
+ *
+ *
+ * License       : BSD-Style
+ *  Copyright (c) 2009 Juniper Networks. All Rights Reserved.
+ *  Redistribution and use in source and binary forms, with or without modification,
+ *  are permitted provided that the following conditions are met:
+ *  1. Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  2. Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  3. The name of the author may not be used to endorse or promote products derived
+ *  from this software without specific prior written permission.
+ *  THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+ *  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ *  AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE
+ *  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ *  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ *  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ *  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+*/
+
+/* Configuration Needed:
+ * set system scripts commit file sflow.commit.slax
+ * Script File:
+ * Deposit this script file to /var/db/scripts/commit/ on both routing-engines
+*/
+
+version 1.0;
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ns func extension = "http://exslt.org/functions";
+
+import "../import/junos.xsl";
+match configuration {
+    var $root = .;
+    var $sflow-config-content := {
+             <protocols> {
+                    <sflow> {
+                        for-each (interfaces/interface [starts-with (name, "ae")]) {
+                            var $int-path = .;
+                            var $int-name = name;
+                            if ($int-path/unit/family/inet/filter/input [contains (filter-name, "ISP-Inbound")]) {
+                                expr jcs:output ($int-name); 
+                            }
+                            if (not($root/protocols/sflow/interfaces [contains (name, $int-name)])){
+                                call add-sflow-cfg ($int-name);
+                                }
+                            }
+                        }
+                    }
+                }
+    if ($root/protocols/sflow/sample-rate/egress){
+        var $sflow-egress-content := {
+            <protocols> {
+                   <sflow> {
+                       <sample-rate> {
+                        <egress delete = "delete">;
+                       }
+                    }
+                }
+            }
+        var $sflow-egress-message = "Looks like egress sflow configuration is configured, only ingress should be used. Deleting sflow egress configuration";
+        call jcs:emit-change ($content = $sflow-egress-content, $message = $sflow-egress-message);
+        expr jcs:syslog("external.info", "script : Deleted Config : protocols sflow egress");
+        }
+    if ($sflow-config-content//interfaces/name)   {
+            for-each ($sflow-config-content//interfaces/name) {
+                expr jcs:syslog("external.info", "script : configuring sflow for interface : " _ .);
+            }
+            var $sflow-config-message = "Adding interfaces to slfow configuration";
+            call jcs:emit-change ($content = $sflow-config-content, $message = $sflow-config-message);
+        }
+    }
+template add-sflow-cfg ($int-name) {
+	<interfaces> {
+        call jcs:emit-comment();
+		<name> $int-name;
+	}
+}
+
